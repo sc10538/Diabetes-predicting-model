@@ -2,13 +2,23 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-df1= pd.read_csv('loan_data.csv')
-df1
-df1.head()
-#find null values
-df1.isnull().sum()
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from scipy.stats import chi2_contingency
 
-# 1. Bar Plot: Distribution of Loan Status
+# Load data
+df1 = pd.read_csv('loan_data.csv')
+
+# Check for missing values
+print(df1.isnull().sum())
+
+# Visualizations
 plt.figure(figsize=(8, 5))
 sns.countplot(x='loan_status', data=df1)
 plt.title('Distribution of Loan Status')
@@ -16,7 +26,6 @@ plt.xlabel('Loan Status')
 plt.ylabel('Count')
 plt.show()
 
-# 2. Histogram: Distribution of Principal Amounts
 plt.figure(figsize=(8, 5))
 sns.histplot(df1['Principal'], bins=10, kde=False)
 plt.title('Distribution of Principal Amounts')
@@ -24,7 +33,6 @@ plt.xlabel('Principal')
 plt.ylabel('Frequency')
 plt.show()
 
-# 3. Histogram: Distribution of Age
 plt.figure(figsize=(8, 5))
 sns.histplot(df1['age'], bins=10, kde=False)
 plt.title('Distribution of Age')
@@ -32,7 +40,6 @@ plt.xlabel('Age')
 plt.ylabel('Frequency')
 plt.show()
 
-# 4. Box Plot: Age Distribution by Education Level
 plt.figure(figsize=(8, 5))
 sns.boxplot(x='education', y='age', data=df1)
 plt.title('Age Distribution by Education Level')
@@ -41,14 +48,12 @@ plt.ylabel('Age')
 plt.xticks(rotation=45)
 plt.show()
 
-# 5. Pie Chart: Gender Distribution
 plt.figure(figsize=(6, 6))
 df1['Gender'].value_counts().plot.pie(autopct='%1.1f%%', startangle=90, colors=['skyblue', 'lightgreen'])
 plt.title('Gender Distribution')
-plt.ylabel('')  # Hide the y-label for clarity
+plt.ylabel('')
 plt.show()
 
-# 6. Scatter Plot: Principal Amount vs Age
 plt.figure(figsize=(8, 5))
 sns.scatterplot(x='age', y='Principal', data=df1)
 plt.title('Principal Amount vs Age')
@@ -56,7 +61,6 @@ plt.xlabel('Age')
 plt.ylabel('Principal')
 plt.show()
 
-# 7. Bar Plot: Education Level Distribution
 plt.figure(figsize=(8, 5))
 sns.countplot(x='education', data=df1)
 plt.title('Education Level Distribution')
@@ -64,3 +68,137 @@ plt.xlabel('Education Level')
 plt.ylabel('Count')
 plt.xticks(rotation=45)
 plt.show()
+
+# Remove outliers
+num_cols = df1.select_dtypes(include=['number']).columns
+df_clean = df1.copy()
+
+for col in num_cols:
+    Q1 = df_clean[col].quantile(0.25)
+    Q3 = df_clean[col].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    df_clean = df_clean[(df_clean[col] >= lower_bound) & (df_clean[col] <= upper_bound)]
+
+print(f"Original dataset shape: {df1.shape}")
+print(f"Dataset shape after removing outliers: {df_clean.shape}")
+
+# Analyze categorical columns
+cat_cols = df1.select_dtypes(include=['object', 'category']).columns
+
+for col in cat_cols:
+    print(f"\n{col} - Unique values:")
+    print(df1[col].value_counts())
+
+for col in cat_cols:
+    plt.figure(figsize=(8, 5))
+    sns.countplot(x=col, data=df1, order=df1[col].value_counts().index)
+    plt.title(f'Distribution of {col}')
+    plt.xlabel(col)
+    plt.ylabel('Count')
+    plt.xticks(rotation=45)
+    plt.show()
+
+# Cross-tab and heatmap
+cross_tab = pd.crosstab(df1['loan_status'], df1['education'])
+plt.figure(figsize=(8, 5))
+sns.heatmap(cross_tab, annot=True, fmt='d', cmap='Blues')
+plt.title('Cross-tabulation of Loan Status and Education')
+plt.show()
+
+# Chi-Square test
+chi2, p, dof, expected = chi2_contingency(cross_tab)
+print(f"Chi-Square test result between 'loan_status' and 'education':")
+print(f"Chi2 Statistic: {chi2}, p-value: {p}")
+
+# Prepare data for modeling
+X = df1.drop('loan_status', axis=1)
+y = df1['loan_status']
+
+# Split the data
+X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.4, random_state=42)
+X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+
+# Preprocessing pipeline
+categorical_cols = X.select_dtypes(include=['object']).columns
+numerical_cols = X.select_dtypes(include=['number']).columns
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', StandardScaler(), numerical_cols),
+        ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_cols)
+    ])
+
+# Fit and transform the data
+X_train_processed = preprocessor.fit_transform(X_train)
+X_val_processed = preprocessor.transform(X_val)
+X_test_processed = preprocessor.transform(X_test)
+
+# Train and evaluate Logistic Regression
+lr_model = LogisticRegression()
+lr_model.fit(X_train_processed, y_train)
+lr_pred = lr_model.predict(X_val_processed)
+lr_accuracy = accuracy_score(y_val, lr_pred)
+
+# Train and evaluate SVM
+svm_model = SVC(kernel='linear')
+svm_model.fit(X_train_processed, y_train)
+svm_pred = svm_model.predict(X_val_processed)
+svm_accuracy = accuracy_score(y_val, svm_pred)
+
+# Train and evaluate KNN
+best_k = 1
+best_score = 0
+for k in range(1, 21):
+    knn_model = KNeighborsClassifier(n_neighbors=k)
+    knn_model.fit(X_train_processed, y_train)
+    score = knn_model.score(X_val_processed, y_val)
+    if score > best_score:
+        best_score = score
+        best_k = k
+knn_model = KNeighborsClassifier(n_neighbors=best_k)
+knn_model.fit(X_train_processed, y_train)
+knn_pred = knn_model.predict(X_val_processed)
+knn_accuracy = accuracy_score(y_val, knn_pred)
+
+# Train and evaluate Decision Tree
+dt_model = DecisionTreeClassifier(max_depth=5)
+dt_model.fit(X_train_processed, y_train)
+dt_pred = dt_model.predict(X_val_processed)
+dt_accuracy = accuracy_score(y_val, dt_pred)
+
+# Store performance metrics
+model_performance = {
+    'Logistic Regression': lr_accuracy,
+    'SVM': svm_accuracy,
+    'KNN': best_score,
+    'Decision Tree': dt_accuracy
+}
+
+# Print best model
+best_model_name = max(model_performance, key=model_performance.get)
+print(f'The best model is: {best_model_name} with an accuracy of {model_performance[best_model_name]:.2f}')
+
+# Example of detailed evaluation for the best model
+if best_model_name == 'Logistic Regression':
+    best_model = lr_model
+elif best_model_name == 'SVM':
+    best_model = svm_model
+elif best_model_name == 'KNN':
+    best_model = knn_model
+else:
+    best_model = dt_model
+
+# Confusion Matrix
+y_pred = best_model.predict(X_val_processed)
+cm = confusion_matrix(y_val, y_pred, labels=best_model.classes_)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=best_model.classes_, yticklabels=best_model.classes_)
+plt.xlabel('Predicted Label')
+plt.ylabel('True Label')
+plt.show()
+
+# Classification Report
+report = classification_report(y_val, y_pred, target_names=best_model.classes_)
+print(report)
+
